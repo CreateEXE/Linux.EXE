@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Navi Avatar</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 100vw; height: 100vh;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    touch-action: none;
+  }
+
+  #canvas-container {
+    position: fixed;
+    bottom: 0; right: 0;
+    width: 220px; height: 320px;
+    cursor: grab;
+    user-select: none;
+  }
+  #canvas-container:active { cursor: grabbing; }
+
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* Speech bubble */
+  #bubble {
+    position: fixed;
+    bottom: 300px; right: 10px;
+    max-width: 220px;
+    background: rgba(10, 12, 30, 0.92);
+    border: 1.5px solid rgba(126, 184, 247, 0.6);
+    border-radius: 16px 16px 4px 16px;
+    padding: 10px 14px;
+    color: #c8d8ff;
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    backdrop-filter: blur(8px);
+  }
+  #bubble.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  #bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -8px; right: 20px;
+    border: 8px solid transparent;
+    border-top-color: rgba(126, 184, 247, 0.6);
+    border-bottom: 0;
+  }
+
+  /* Inner thought (italic, dimmer) */
+  #inner-thought {
+    position: fixed;
+    bottom: 300px; right: 10px;
+    max-width: 200px;
+    color: rgba(180, 200, 255, 0.45);
+    font-size: 11px;
+    font-style: italic;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+
+  /* Stat overlay (card face) */
+  #stats {
+    position: fixed;
+    top: 10px; right: 10px;
+    background: rgba(8, 10, 25, 0.85);
+    border: 1px solid rgba(126,184,247,0.3);
+    border-radius: 12px;
+    padding: 8px 12px;
+    color: #7eb8f7;
+    font-size: 11px;
+    line-height: 1.8;
+    min-width: 140px;
+    backdrop-filter: blur(6px);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #stats.visible { opacity: 1; }
+  #stats h3 {
+    color: #c8d8ff;
+    font-size: 13px;
+    margin-bottom: 4px;
+    letter-spacing: 0.05em;
+  }
+  .stat-bar {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .stat-bar span { flex: 0 0 70px; }
+  .bar-track {
+    flex: 1; height: 4px;
+    background: rgba(126,184,247,0.15);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #7eb8f7, #a8e6cf);
+    border-radius: 2px;
+    transition: width 1s ease;
+  }
+
+  /* Feedback buttons */
+  #feedback {
+    position: fixed;
+    bottom: 20px; right: 230px;
+    display: flex; flex-direction: column; gap: 6px;
+    opacity: 0; transition: opacity 0.3s;
+  }
+  #feedback.visible { opacity: 1; }
+  .fb-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(126,184,247,0.4);
+    background: rgba(10,12,30,0.85);
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .fb-btn:hover { transform: scale(1.15); background: rgba(126,184,247,0.2); }
+
+  /* Animation state badge */
+  #anim-badge {
+    position: fixed;
+    bottom: 324px; right: 10px;
+    font-size: 10px;
+    color: rgba(126,184,247,0.5);
+    letter-spacing: 0.08em;
+  }
+
+  /* No-VRM fallback face */
+  #fallback-face {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    width: 180px; height: 200px;
+    background: rgba(10,12,30,0.9);
+    border: 2px solid rgba(126,184,247,0.5);
+    border-radius: 20px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 8px;
+    display: none;
+  }
+  #fallback-face .face { font-size: 42px; }
+  #fallback-face .name { color: #7eb8f7; font-size: 14px; letter-spacing: 0.1em; }
+  #fallback-face .mood { color: rgba(200,216,255,0.6); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<!-- VRM canvas -->
+<div id="canvas-container">
+  <canvas id="vrm-canvas"></canvas>
+</div>
+
+<!-- Fallback when no VRM loaded -->
+<div id="fallback-face">
+  <div class="face" id="ff-face">( ˘ω˘ )</div>
+  <div class="name" id="ff-name">NAVI</div>
+  <div class="mood" id="ff-mood">idle</div>
+</div>
+
+<!-- Speech bubble -->
+<div id="bubble"></div>
+<div id="inner-thought"></div>
+<div id="anim-badge">IDLE</div>
+
+<!-- Stats card -->
+<div id="stats">
+  <h3 id="stat-name">Navi</h3>
+  <div id="stat-rows"></div>
+</div>
+
+<!-- Feedback -->
+<div id="feedback">
+  <button class="fb-btn" onclick="sendFeedback('positive')" title="Good">👍</button>
+  <button class="fb-btn" onclick="sendFeedback('negative')" title="Bad">👎</button>
+  <button class="fb-btn" onclick="toggleStats()" title="Stats">📊</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":        "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.7/lib/three-vrm.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+
+// ── State ────────────────────────────────────────────────────────────────────
+let vrm        = null;
+let mixer      = null;
+let clock      = new THREE.Clock();
+let animState  = 'idle';
+let currentLogId = null;
+let statsVisible = false;
+
+const ANIM_FACES = {
+  idle:      '( ˘ω˘ )',
+  talking:   '( •̀ᴗ•́ )',
+  thinking:  '( ´ . .̫ . ` )',
+  moving:    '( ∿°○° )∿',
+  reacting:  '( ⊙_⊙ )',
+  sleeping:  '( -_-)ᶻᶻ',
+};
+
+// ── Three.js scene ────────────────────────────────────────────────────────────
+const canvas    = document.getElementById('vrm-canvas');
+const renderer  = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(220, 320);
+renderer.setClearColor(0x000000, 0);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 220/320, 0.1, 20);
+camera.position.set(0, 1.3, 3.0);
+camera.lookAt(0, 1.0, 0);
+
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+scene.add(ambientLight);
+const dirLight = new THREE.DirectionalLight(0xc8d8ff, 1.2);
+dirLight.position.set(1, 2, 2);
+scene.add(dirLight);
+
+// ── VRM loader ────────────────────────────────────────────────────────────────
+async function loadVRM(url) {
+  const loader = new GLTFLoader();
+  loader.register(parser => new VRMLoaderPlugin(parser));
+  try {
+    const gltf = await loader.loadAsync(url);
+    VRMUtils.removeUnnecessaryJoints(gltf.scene);
+    vrm = gltf.userData.vrm;
+    scene.add(vrm.scene);
+    document.getElementById('fallback-face').style.display = 'none';
+    console.log('[Navi] VRM loaded');
+  } catch(e) {
+    console.warn('[Navi] VRM load failed, using fallback face:', e.message);
+    document.getElementById('canvas-container').style.display = 'none';
+    document.getElementById('fallback-face').style.display = 'flex';
+  }
+}
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+let blinkTimer = 0;
+let breathT    = 0;
+let mouthT     = 0;
+let isTalking  = false;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+
+  if (vrm) {
+    vrm.update(dt);
+
+    // Breathing
+    breathT += dt;
+    if (vrm.humanoid) {
+      const chest = vrm.humanoid.getNormalizedBoneNode('chest');
+      if (chest) chest.rotation.x = Math.sin(breathT * 1.2) * 0.015;
+    }
+
+    // Blinking
+    blinkTimer -= dt;
+    if (blinkTimer <= 0) {
+      blink();
+      blinkTimer = 3 + Math.random() * 4;
+    }
+
+    // Talking mouth
+    if (isTalking && vrm.expressionManager) {
+      mouthT += dt * 8;
+      const aa = Math.abs(Math.sin(mouthT)) * 0.7;
+      vrm.expressionManager.setValue('aa', aa);
+    } else if (vrm.expressionManager) {
+      vrm.expressionManager.setValue('aa', 0);
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+function blink() {
+  if (!vrm?.expressionManager) return;
+  vrm.expressionManager.setValue('blink', 1);
+  setTimeout(() => vrm.expressionManager.setValue('blink', 0), 150);
+}
+
+// ── Animation states ──────────────────────────────────────────────────────────
+function setAnimationState(state) {
+  animState = state;
+  isTalking = (state === 'talking');
+  document.getElementById('anim-badge').textContent = state.toUpperCase();
+  document.getElementById('ff-face').textContent = ANIM_FACES[state] || ANIM_FACES.idle;
+  document.getElementById('ff-mood').textContent = state;
+
+  if (!vrm?.expressionManager) return;
+  // Reset all expressions
+  ['happy','sad','angry','surprised','relaxed'].forEach(e =>
+    vrm.expressionManager.setValue(e, 0));
+
+  const MAP = {
+    idle:     [],
+    talking:  [['happy', 0.3]],
+    thinking: [['relaxed', 0.5]],
+    reacting: [['surprised', 0.8]],
+    sleeping: [['relaxed', 1.0]],
+    moving:   [['happy', 0.2]],
+  };
+  (MAP[state] || []).forEach(([k, v]) => vrm.expressionManager.setValue(k, v));
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────────────────
+let bubbleTimer = null;
+
+function showBubble(text, durationMs = 6000) {
+  const el = document.getElementById('bubble');
+  el.textContent = text;
+  el.classList.add('visible');
+  document.getElementById('feedback').classList.add('visible');
+  if (bubbleTimer) clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(() => {
+    el.classList.remove('visible');
+    document.getElementById('feedback').classList.remove('visible');
+  }, durationMs);
+}
+
+function showInnerThought(text) {
+  const el = document.getElementById('inner-thought');
+  el.textContent = `✦ ${text}`;
+  el.style.opacity = 1;
+  setTimeout(() => el.style.opacity = 0, 5000);
+}
+
+function updateStats(traits, name) {
+  document.getElementById('stat-name').textContent = name || 'Navi';
+  const rows = document.getElementById('stat-rows');
+  rows.innerHTML = '';
+  Object.entries(traits).slice(0, 5).forEach(([k, v]) => {
+    rows.innerHTML += `
+      <div class="stat-bar">
+        <span>${k}</span>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${v}%"></div>
+        </div>
+      </div>`;
+  });
+}
+
+window.toggleStats = () => {
+  statsVisible = !statsVisible;
+  document.getElementById('stats').classList.toggle('visible', statsVisible);
+};
+
+window.sendFeedback = (type) => {
+  fetch('/feedback', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({log_id: currentLogId, feedback: type})
+  }).catch(()=>{});
+  showBubble(type === 'positive' ? 'Thank you 💙' : 'I\'ll adjust…');
+};
+
+// ── Drag to reposition ────────────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+let dragging = false, dragStartX, dragStartY, origRight, origBottom;
+
+container.addEventListener('pointerdown', e => {
+  dragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  origRight  = parseInt(container.style.right  || '0') || 0;
+  origBottom = parseInt(container.style.bottom || '0') || 0;
+  container.setPointerCapture(e.pointerId);
+});
+container.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  container.style.right  = (origRight  - (e.clientX - dragStartX)) + 'px';
+  container.style.bottom = (origBottom + (e.clientY - dragStartY)) + 'px';
+});
+container.addEventListener('pointerup', () => { dragging = false; });
+
+// ── State sync from Python backend (polling) ──────────────────────────────────
+async function pollState() {
+  try {
+    const r    = await fetch('/state');
+    const data = await r.json();
+
+    currentLogId = data.log_id;
+    setAnimationState(data.animation_state || 'idle');
+
+    if (data.speech)       showBubble(data.speech);
+    if (data.inner_thought) showInnerThought(data.inner_thought);
+    if (data.traits)       updateStats(data.traits, data.entity_name);
+
+    // Load VRM if path provided and not yet loaded
+    if (data.vrm_url && !vrm) loadVRM(data.vrm_url);
+
+  } catch(e) { /* backend not up yet */ }
+}
+
+setInterval(pollState, 2000);
+pollState();
+</script>
+</body>
+</html>
